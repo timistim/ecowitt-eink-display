@@ -11,7 +11,6 @@ from waveshare_epd import epd2in13_V4 as epd_driver
 URL = "http://192.168.50.10/get_livedata_info"
 ROTATE_180 = True
 UPDATE_SECONDS = 60
-CLEAR_SECONDS = 60 * 60  # rebuild the partial-refresh base once per hour
 
 
 def item_map(items):
@@ -101,7 +100,6 @@ def draw_screen(w, epd):
 
 def main():
     epd = epd_driver.EPD()
-    next_clear = 0
     next_update = time.monotonic()
     partial_ready = False
 
@@ -122,15 +120,11 @@ def main():
             try:
                 image = draw_screen(weather, epd)
                 buffer = epd.getbuffer(image)
-                now = time.monotonic()
 
-                if not partial_ready or now >= next_clear:
+                if not partial_ready:
                     epd.init()
                     epd.Clear(0xFF)
-                    epd.displayPartBaseImage(buffer)
-                    next_clear = now + CLEAR_SECONDS
                     partial_ready = True
-                    continue
 
                 epd.displayPartial(buffer)
 
