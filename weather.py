@@ -139,6 +139,14 @@ def prepare_partial_update(epd):
     epd.send_data(0x03)
 
 
+def merge_boxes(boxes):
+    x0 = min(box[0] for box in boxes)
+    y0 = min(box[1] for box in boxes)
+    x1 = max(box[2] for box in boxes)
+    y1 = max(box[3] for box in boxes)
+    return (x0, y0, x1, y1)
+
+
 def display_partial_window(epd, native_image, box):
     x0, y0, x1, y1 = box
     crop = native_image.crop(box)
@@ -146,6 +154,8 @@ def display_partial_window(epd, native_image, box):
     epd.SetCursor(x0 // 8, y0)
     epd.send_command(0x24)  # WRITE_RAM
     epd.send_data2(bytearray(crop.tobytes("raw")))
+    # V4 may still apply a visible full-panel waveform here, but this keeps
+    # each minute update to one refresh instead of one refresh per changed box.
     epd.TurnOnDisplayPart()
 
 
@@ -167,10 +177,11 @@ def display_changed_regions(epd, previous_image, image):
         print("No display regions changed")
         return
 
+    merged_box = merge_boxes(changed_boxes)
     prepare_partial_update(epd)
-    for box in changed_boxes:
-        print(f"Windowed partial refresh {box}")
-        display_partial_window(epd, native_image, box)
+    print(f"Windowed partial refresh {merged_box}")
+    display_partial_window(epd, native_image, merged_box)
+
 
 def draw_screen(w, epd):
     width, height = epd.height, epd.width
