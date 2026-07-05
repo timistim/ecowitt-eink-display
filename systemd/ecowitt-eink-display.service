@@ -1,0 +1,16 @@
+[Unit]
+Description=Ecowitt e-ink weather display
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tflowers
+WorkingDirectory=/home/tflowers/ecowitt-eink-display
+ExecStart=/usr/bin/python3 /home/tflowers/ecowitt-eink-display/weather.py
+Restart=always
+RestartSec=15
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
