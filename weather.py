@@ -11,7 +11,7 @@ from waveshare_epd import epd2in13_V4 as epd_driver
 URL = "http://192.168.50.10/get_livedata_info"
 ROTATE_180 = True
 UPDATE_SECONDS = 60
-CLEAR_SECONDS = 60 * 60  # once per hour
+CLEAR_SECONDS = 60 * 60  # extra white clear once per hour
 
 
 def item_map(items):
@@ -122,16 +122,11 @@ def main():
             buffer = epd.getbuffer(image)
             now = time.monotonic()
 
+            epd.init()
             if now >= next_clear:
-                epd.init()
                 epd.Clear(0xFF)
-                epd.display(buffer)
-                epd.sleep()
                 next_clear = now + CLEAR_SECONDS
-                continue
-
-            epd.init_fast()
-            epd.display_fast(buffer)
+            epd.display(buffer)
             epd.sleep()
 
         except Exception as e:
