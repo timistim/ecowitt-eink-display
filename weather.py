@@ -111,9 +111,15 @@ def draw_error(epd, message):
 def main():
     epd = epd_driver.EPD()
     next_clear = 0
+    next_update = time.monotonic()
 
     while True:
         try:
+            now = time.monotonic()
+            if now < next_update:
+                time.sleep(next_update - now)
+            next_update += UPDATE_SECONDS
+
             weather = get_weather()
             image = draw_screen(weather, epd)
             buffer = epd.getbuffer(image)
@@ -122,8 +128,10 @@ def main():
             if now >= next_clear:
                 epd.init()
                 epd.Clear(0xFF)
+                epd.display(buffer)
                 epd.sleep()
                 next_clear = now + CLEAR_SECONDS
+                continue
 
             epd.init_fast()
             epd.display_fast(buffer)
@@ -139,8 +147,6 @@ def main():
                 epd.sleep()
             except Exception:
                 pass
-
-        time.sleep(UPDATE_SECONDS)
 
 
 if __name__ == "__main__":
