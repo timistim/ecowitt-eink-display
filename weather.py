@@ -19,7 +19,9 @@ def item_map(items):
 
 
 def get_weather():
-    data = requests.get(URL, timeout=10).json()
+    response = requests.get(URL, timeout=10)
+    response.raise_for_status()
+    data = response.json()
     common = item_map(data["common_list"])
     rain = item_map(data["piezoRain"])
     indoor = data["wh25"][0]
@@ -95,17 +97,6 @@ def draw_screen(w, epd):
     return image
 
 
-def draw_error(epd, message):
-    width, height = epd.height, epd.width
-    image = Image.new("1", (width, height), 255)
-    draw = ImageDraw.Draw(image)
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-    draw.text((0, 0), "Weather error", font=font, fill=0)
-    draw.text((0, 18), message[:32], font=font, fill=0)
-    draw.text((0, 108), time.strftime("%I:%M %p").lstrip("0"), font=font, fill=0)
-    if ROTATE_180:
-        return image.rotate(180)
-    return image
 
 
 def main():
@@ -114,13 +105,19 @@ def main():
     next_update = time.monotonic()
 
     while True:
-        try:
-            now = time.monotonic()
-            if now < next_update:
-                time.sleep(next_update - now)
-            next_update += UPDATE_SECONDS
+        now = time.monotonic()
+        if now < next_update:
+            time.sleep(next_update - now)
+        next_update += UPDATE_SECONDS
 
+        try:
             weather = get_weather()
+        except Exception as e:
+            print("Weather update skipped:", e)
+            traceback.print_exc()
+            continue
+
+        try:
             image = draw_screen(weather, epd)
             buffer = epd.getbuffer(image)
             now = time.monotonic()
@@ -138,15 +135,8 @@ def main():
             epd.sleep()
 
         except Exception as e:
-            print("ERROR:", e)
+            print("Display update failed:", e)
             traceback.print_exc()
-            try:
-                epd.init()
-                image = draw_error(epd, str(e))
-                epd.display(epd.getbuffer(image))
-                epd.sleep()
-            except Exception:
-                pass
 
 
 if __name__ == "__main__":
