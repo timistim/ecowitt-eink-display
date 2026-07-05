@@ -3,14 +3,25 @@ import time
 import math
 import traceback
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 sys.path.append("/home/tflowers/e-Paper/RaspberryPi_JetsonNano/python/lib")
 from waveshare_epd import epd2in13_V4 as epd_driver
+from waveshare_epd import epdconfig
 
 URL = "http://192.168.50.10/get_livedata_info"
 ROTATE_180 = True
 UPDATE_SECONDS = 60
+
+# Regions in the unrotated landscape drawing coordinates. Keeping these small
+# limits partial-refresh flashing to the areas that can actually change.
+UPDATE_REGIONS = (
+    (0, 0, 118, 42),      # outdoor temperature and humidity
+    (122, 0, 250, 42),    # indoor temperature and humidity
+    (0, 45, 150, 122),    # text weather details and updated time
+    (170, 45, 250, 122),  # wind direction compass
+)
+REGION_PADDING = 4
 
 
 def item_map(items):
@@ -64,6 +75,103 @@ def draw_compass(draw, cx, cy, r, degrees, font):
     draw.polygon([(x2, y2), (x3, y3), (x4, y4)], fill=0)
 
 
+def padded_box(box, width, height, padding=REGION_PADDING):
+    x0, y0, x1, y1 = box
+    return (
+        max(0, x0 - padding),
+        max(0, y0 - padding),
+        min(width, x1 + padding),
+        min(height, y1 + padding),
+    )
+
+
+def rotate_180_box(box, width, height):
+    x0, y0, x1, y1 = box
+    return (width - x1, height - y1, width - x0, height - y0)
+
+
+def update_regions_for(image):
+    width, height = image.size
+    regions = [padded_box(box, width, height) for box in UPDATE_REGIONS]
+    if ROTATE_180:
+        regions = [rotate_180_box(box, width, height) for box in regions]
+    return regions
+
+
+def image_to_native(image, epd):
+    if image.size == (epd.width, epd.height):
+        return image.convert("1")
+    if image.size == (epd.height, epd.width):
+        return image.rotate(90, expand=True).convert("1")
+    raise ValueError(f"Unexpected image size {image.size}")
+
+
+def landscape_box_to_native(box, source_width):
+    x0, y0, x1, y1 = box
+    return (y0, source_width - x1, y1, source_width - x0)
+
+
+def align_native_box(box, epd):
+    x0, y0, x1, y1 = box
+    x0 = max(0, (x0 // 8) * 8)
+    x1 = min(epd.width, ((x1 + 7) // 8) * 8)
+    y0 = max(0, y0)
+    y1 = min(epd.height, y1)
+    if x0 >= x1 or y0 >= y1:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def prepare_partial_update(epd):
+    epdconfig.digital_write(epd.reset_pin, 0)
+    epdconfig.delay_ms(1)
+    epdconfig.digital_write(epd.reset_pin, 1)
+
+    epd.send_command(0x3C)  # BorderWaveform
+    epd.send_data(0x80)
+
+    epd.send_command(0x01)  # Driver output control
+    epd.send_data(0xF9)
+    epd.send_data(0x00)
+    epd.send_data(0x00)
+
+    epd.send_command(0x11)  # Data entry mode
+    epd.send_data(0x03)
+
+
+def display_partial_window(epd, native_image, box):
+    x0, y0, x1, y1 = box
+    crop = native_image.crop(box)
+    epd.SetWindow(x0, y0, x1 - 1, y1 - 1)
+    epd.SetCursor(x0 // 8, y0)
+    epd.send_command(0x24)  # WRITE_RAM
+    epd.send_data2(bytearray(crop.tobytes("raw")))
+    epd.TurnOnDisplayPart()
+
+
+def display_changed_regions(epd, previous_image, image):
+    native_image = image_to_native(image, epd)
+    changed_boxes = []
+
+    for region in update_regions_for(image):
+        before = previous_image.crop(region)
+        after = image.crop(region)
+        if ImageChops.difference(before, after).getbbox() is None:
+            continue
+        native_box = landscape_box_to_native(region, image.size[0])
+        native_box = align_native_box(native_box, epd)
+        if native_box is not None:
+            changed_boxes.append(native_box)
+
+    if not changed_boxes:
+        print("No display regions changed")
+        return
+
+    prepare_partial_update(epd)
+    for box in changed_boxes:
+        print(f"Windowed partial refresh {box}")
+        display_partial_window(epd, native_image, box)
+
 def draw_screen(w, epd):
     width, height = epd.height, epd.width
     image = Image.new("1", (width, height), 255)
@@ -101,7 +209,7 @@ def draw_screen(w, epd):
 def main():
     epd = epd_driver.EPD()
     next_update = time.monotonic()
-    partial_ready = False
+    previous_image = None
 
     try:
         while True:
@@ -119,20 +227,19 @@ def main():
 
             try:
                 image = draw_screen(weather, epd)
-                buffer = epd.getbuffer(image)
 
-                if not partial_ready:
+                if previous_image is None:
                     print("Initializing partial refresh base image")
                     epd.init()
-                    epd.displayPartBaseImage(buffer)
-                    partial_ready = True
+                    epd.displayPartBaseImage(epd.getbuffer(image))
+                    previous_image = image
                     continue
 
-                print("Partial refresh update")
-                epd.displayPartial(buffer)
+                display_changed_regions(epd, previous_image, image)
+                previous_image = image
 
             except Exception as e:
-                partial_ready = False
+                previous_image = None
                 print("Display update failed:", e)
                 traceback.print_exc()
                 try:
