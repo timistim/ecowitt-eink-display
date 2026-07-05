@@ -122,12 +122,13 @@ def main():
                 buffer = epd.getbuffer(image)
 
                 if not partial_ready:
-                    print("Initializing partial refresh mode")
+                    print("Initializing partial refresh base image")
                     epd.init()
+                    epd.displayPartBaseImage(buffer)
                     partial_ready = True
-                else:
-                    print("Partial refresh update")
+                    continue
 
+                print("Partial refresh update")
                 epd.displayPartial(buffer)
 
             except Exception as e:
