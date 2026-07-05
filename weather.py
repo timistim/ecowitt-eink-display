@@ -11,7 +11,7 @@ from waveshare_epd import epd2in13_V4 as epd_driver
 URL = "http://192.168.50.10/get_livedata_info"
 ROTATE_180 = True
 UPDATE_SECONDS = 60
-CLEAR_SECONDS = 60 * 60  # extra white clear once per hour
+CLEAR_SECONDS = 60 * 60  # rebuild the partial-refresh base once per hour
 
 
 def item_map(items):
@@ -103,35 +103,50 @@ def main():
     epd = epd_driver.EPD()
     next_clear = 0
     next_update = time.monotonic()
+    partial_ready = False
 
-    while True:
-        now = time.monotonic()
-        if now < next_update:
-            time.sleep(next_update - now)
-        next_update += UPDATE_SECONDS
-
-        try:
-            weather = get_weather()
-        except Exception as e:
-            print("Weather update skipped:", e)
-            traceback.print_exc()
-            continue
-
-        try:
-            image = draw_screen(weather, epd)
-            buffer = epd.getbuffer(image)
+    try:
+        while True:
             now = time.monotonic()
+            if now < next_update:
+                time.sleep(next_update - now)
+            next_update += UPDATE_SECONDS
 
-            epd.init()
-            if now >= next_clear:
-                epd.Clear(0xFF)
-                next_clear = now + CLEAR_SECONDS
-            epd.display(buffer)
+            try:
+                weather = get_weather()
+            except Exception as e:
+                print("Weather update skipped:", e)
+                traceback.print_exc()
+                continue
+
+            try:
+                image = draw_screen(weather, epd)
+                buffer = epd.getbuffer(image)
+                now = time.monotonic()
+
+                if not partial_ready or now >= next_clear:
+                    epd.init()
+                    epd.Clear(0xFF)
+                    epd.displayPartBaseImage(buffer)
+                    next_clear = now + CLEAR_SECONDS
+                    partial_ready = True
+                    continue
+
+                epd.displayPartial(buffer)
+
+            except Exception as e:
+                partial_ready = False
+                print("Display update failed:", e)
+                traceback.print_exc()
+                try:
+                    epd.sleep()
+                except Exception:
+                    pass
+    finally:
+        try:
             epd.sleep()
-
-        except Exception as e:
-            print("Display update failed:", e)
-            traceback.print_exc()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
